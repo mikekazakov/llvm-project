@@ -32,6 +32,24 @@ struct __iterator_partitions {
   _Iterator __end() const;
 };
 
+// stores the result of a reduction over partitions, i.e. the minimum value and the corresponding partition index.
+ template <class _Iterator, bool _AtomicResult = ...>
+ struct __min_partition_result {
+  // index of the partition with the minimum value
+  std::atomic<size_t> __min_partition;
+
+  // iterator pointing to the minimum value
+  _Iterator __min_iterator;
+  OR
+  std::atomic<_Iterator> __min_iterator;
+
+  // initializes the result with the global end iterator and partition index set to the maximum value
+  __min_partition_result(_Iterator __last);
+
+  // atomically stores a new result if the iterator and partition are less than currently stored
+  void __commit(size_t __partition, _Iterator __it);
+};
+
 // partitions the input depending on the input size and the number of partitions.
 // for random-access iterators effectively stores the input iterator and a minimal bookkeeping info.
 // for forward iterators traverses the entire range and stores first-last pairs of each partition, O(N) time complexity.
@@ -40,6 +58,7 @@ std::optional<__iterator_partitions<_Iterator>>
 __make_iterator_partitions(_Iterator __first, size_t __count, size_t __partitions);
 */
 
+#include <__atomic/atomic.h>
 #include <__config>
 #include <__iterator/concepts.h>
 #include <__iterator/iterator_traits.h>
@@ -48,6 +67,12 @@ __make_iterator_partitions(_Iterator __first, size_t __count, size_t __partition
 #include <__memory/construct_at.h>
 #include <__memory/destroy.h>
 #include <__memory/unique_ptr.h>
+#include <__mutex/lock_guard.h>
+#include <__mutex/mutex.h>
+#include <__type_traits/is_assignable.h>
+#include <__type_traits/is_constructible.h>
+#include <__type_traits/is_trivially_copyable.h>
+#include <limits>
 #include <optional>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
@@ -74,15 +99,15 @@ struct __iterator_partitions;
 
 template <class _Iterator>
 struct __iterator_partitions<_Iterator, true> {
-  size_t __partitions_count() const { return __partitions_count_; }
+  _LIBCPP_HIDE_FROM_ABI size_t __partitions_count() const { return __partitions_count_; }
 
-  __iterator_range<_Iterator> __partition(size_t __n) const {
+  _LIBCPP_HIDE_FROM_ABI __iterator_range<_Iterator> __partition(size_t __n) const {
     _Iterator __first = __base_ + __n * __partition_size_ + (__n < __remainder_ ? __n : __remainder_);
     _Iterator __last  = __first + __partition_size_ + (__n < __remainder_ ? 1 : 0);
     return __iterator_range<_Iterator>{__first, __last};
   }
 
-  _Iterator __end() const { return __base_ + __count_; }
+  _LIBCPP_HIDE_FROM_ABI _Iterator __end() const { return __base_ + __count_; }
 
   _Iterator __base_;
   size_t __count_;
@@ -93,16 +118,18 @@ struct __iterator_partitions<_Iterator, true> {
 
 template <class _Iterator>
 struct __iterator_partitions<_Iterator, false> {
-  size_t __partitions_count() const { return __partitions_count_; }
+  _LIBCPP_HIDE_FROM_ABI size_t __partitions_count() const { return __partitions_count_; }
 
-  __iterator_range<_Iterator> __partition(size_t __n) const { return *(__partitions_.get() + __n); }
+  _LIBCPP_HIDE_FROM_ABI __iterator_range<_Iterator> __partition(size_t __n) const {
+    return *(__partitions_.get() + __n);
+  }
 
-  _Iterator __end() const { return (__partitions_.get() + __partitions_count_ - 1)->__last; }
+  _LIBCPP_HIDE_FROM_ABI _Iterator __end() const { return (__partitions_.get() + __partitions_count_ - 1)->__last; }
 
   struct __destroy_partitions {
     size_t __allocated;
     size_t __constructed;
-    void operator()(__iterator_range<_Iterator>* __ptr) {
+    _LIBCPP_HIDE_FROM_ABI void operator()(__iterator_range<_Iterator>* __ptr) {
       std::destroy_n(__ptr, __constructed);
       std::allocator<__iterator_range<_Iterator>>().deallocate(__ptr, __allocated);
     }
@@ -112,8 +139,61 @@ struct __iterator_partitions<_Iterator, false> {
   size_t __partitions_count_;
 };
 
+template <class _Iterator,
+          bool _AtomicResult = __has_random_access_iterator_category_or_concept<_Iterator>::value &&
+                               std::is_trivially_copyable_v<_Iterator> && std::is_copy_constructible_v<_Iterator> &&
+                               std::is_move_constructible_v<_Iterator> && std::is_copy_assignable_v<_Iterator> &&
+                               std::is_move_assignable_v<_Iterator> >
+struct __min_partition_result;
+
+// This specialization requires __has_random_access_iterator_category_or_concept to be able to compare iterators.
 template <class _Iterator>
-std::optional<__iterator_partitions<_Iterator>>
+struct __min_partition_result<_Iterator, true> {
+  std::atomic<size_t> __min_partition;
+  std::atomic<_Iterator> __min_iterator;
+
+  _LIBCPP_HIDE_FROM_ABI __min_partition_result(_Iterator __last)
+      : __min_partition{std::numeric_limits<size_t>::max()}, __min_iterator{__last} {}
+
+  _LIBCPP_HIDE_FROM_ABI void __commit(size_t __partition, _Iterator __it) {
+    // Achive global minimum for both partition index and iterator by running two independent CAS loops and placing
+    // minimum values.
+    _Iterator __prev_iterator = __min_iterator;
+    while (__prev_iterator > __it && !__min_iterator.compare_exchange_weak(__prev_iterator, __it))
+      ;
+
+    size_t __prev_partition = __min_partition;
+    while (__prev_partition > __partition && !__min_partition.compare_exchange_weak(__prev_partition, __partition))
+      ;
+  }
+};
+
+template <class _Iterator>
+struct __min_partition_result<_Iterator, false> {
+  std::atomic<size_t> __min_partition;
+  _Iterator __min_iterator;
+  std::mutex __mut;
+
+  _LIBCPP_HIDE_FROM_ABI __min_partition_result(_Iterator __last)
+      : __min_partition{std::numeric_limits<size_t>::max()}, __min_iterator{__last} {}
+
+  _LIBCPP_HIDE_FROM_ABI void __commit(size_t __partition, _Iterator __it) {
+    // Achieve global minimum for partition index and iterator by first ensuring we're the lowest partition and then
+    // setting the iterator. This exploits the contract that a partition can only be processed by a single thread.
+    size_t __prev_partition = std::numeric_limits<size_t>::max();
+    while (!__min_partition.compare_exchange_weak(__prev_partition, __partition)) {
+      if (__prev_partition < __partition)
+        return;
+    }
+
+    std::lock_guard lock{__mut};
+    if (__min_partition == __partition)
+      __min_iterator = __it;
+  }
+};
+
+template <class _Iterator>
+_LIBCPP_HIDE_FROM_ABI std::optional<__iterator_partitions<_Iterator>>
 __make_iterator_partitions(_Iterator __first, size_t __count, size_t __partitions) {
   // TODO: assert that __partitions > 0 && __partitions <= __count
   __iterator_partitions<_Iterator> __p;

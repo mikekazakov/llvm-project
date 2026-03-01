@@ -9,18 +9,22 @@
 // REQUIRES: std-at-least-c++17
 
 // UNSUPPORTED: libcpp-has-no-incomplete-pstl
+// UNSUPPORTED: no-threads
 
 // <__pstl/iterator_partitions.h>
 
-// this test checks the validity of partitioning and support for different iterators
+// this test checks the validity of partitioning and collecting min iterators
 
 #include <__pstl/iterator_partitions.h>
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <vector>
 #include <forward_list>
 #include <list>
 #include <numeric>
+#include <random>
+#include <thread>
 
 template <class Container>
 static void test_make_iterator_partitions() {
@@ -209,8 +213,55 @@ static void test_make_iterator_partitions() {
   }
 }
 
+template <typename It>
+void test_min_iterator_result(It first, It last) {
+  // partition the input into 4 * 4 partitions
+  const size_t size                      = std::distance(first, last);
+  constexpr size_t num_threads           = 4;
+  constexpr size_t partitions_per_thread = 4;
+  const auto partitions = std::__pstl::__make_iterator_partitions(first, size, num_threads * partitions_per_thread);
+  assert(partitions);
+
+  // construct a min result that will receive iterators from other threads
+  std::__pstl::__min_partition_result<It> min_result{last};
+  assert(min_result.__min_partition == std::numeric_limits<size_t>::max());
+  assert(min_result.__min_iterator == last);
+
+  // run parallel threads to commit results from
+  std::thread threads[num_threads];
+  for (size_t thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
+    threads[thread_idx] = std::thread([&, thread_idx] {
+      // commit iterators pointing to first elements of each partition of this thread, in a random order
+      size_t partition_indices[partitions_per_thread] = {};
+      std::iota(std::begin(partition_indices), std::end(partition_indices), thread_idx * partitions_per_thread);
+      std::shuffle(std::begin(partition_indices), std::end(partition_indices), std::mt19937{std::random_device{}()});
+      for (size_t partition_index : partition_indices)
+        min_result.__commit(partition_index, partitions->__partition(partition_index).__first);
+    });
+  }
+
+  for (auto& thread : threads)
+    thread.join();
+
+  // once finished, the result should point at the first element
+  assert(min_result.__min_partition == 0);
+  assert(min_result.__min_iterator == first);
+}
+
+void test_min_iterator_result_random_access_iterator() {
+  int a[1024] = {};
+  test_min_iterator_result(std::begin(a), std::end(a));
+}
+
+void test_min_iterator_result_forward_iterator() {
+  std::forward_list<int> l(1024);
+  test_min_iterator_result(std::begin(l), std::end(l));
+}
+
 int main() {
   test_make_iterator_partitions< std::vector<int> >();
   test_make_iterator_partitions< std::list<int> >();
   test_make_iterator_partitions< std::forward_list<int> >();
+  test_min_iterator_result_random_access_iterator();
+  test_min_iterator_result_forward_iterator();
 }
