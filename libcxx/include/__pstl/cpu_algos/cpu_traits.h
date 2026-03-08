@@ -36,6 +36,10 @@ namespace __pstl {
 //  optional<__empty> __for_each(_RandomAccessIterator __first, _RandomAccessIterator __last, _Functor __func);
 //    - __func must take a subrange of [__first, __last) that should be executed in serial
 //
+//  template <class _Functor>
+//  optional<__empty> __for_each_chunk(size_t __chunks, _Functor __func);
+//   - __func must take a chunk index that should be processed in serial
+//
 //  template <class _Iterator, class _UnaryOp, class _Tp, class _BinaryOp, class _Reduction>
 //  optional<_Tp> __transform_reduce(_Iterator __first, _Iterator __last, _UnaryOp, _Tp __init, _BinaryOp, _Reduction);
 //

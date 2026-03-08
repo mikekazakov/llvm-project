@@ -9,6 +9,7 @@
 #ifndef _LIBCPP___PSTL_BACKENDS_DEFAULT_H
 #define _LIBCPP___PSTL_BACKENDS_DEFAULT_H
 
+#include <__algorithm/adjacent_find.h>
 #include <__algorithm/copy_n.h>
 #include <__algorithm/equal.h>
 #include <__algorithm/fill_n.h>
@@ -23,6 +24,7 @@
 #include <__iterator/next.h>
 #include <__pstl/backend_fwd.h>
 #include <__pstl/dispatch.h>
+#include <__pstl/iterator_partitions.h>
 #include <__utility/empty.h>
 #include <__utility/forward.h>
 #include <__utility/move.h>
@@ -94,6 +96,9 @@ namespace __pstl {
 // - copy_n
 // - rotate_copy
 //
+// for_each_iterator_partition family
+// ----------------------------------
+// - adjacent_find
 
 //////////////////////////////////////////////////////////////
 // find_if family
@@ -526,6 +531,42 @@ struct __rotate_copy<__default_backend_tag, _ExecutionPolicy> {
     if (__result_mid == nullopt)
       return nullopt;
     return _Copy()(__policy, std::move(__first), std::move(__middle), *std::move(__result_mid));
+  }
+};
+
+// for_each_iterator_partition family
+
+template <class _ExecutionPolicy>
+struct __adjacent_find<__default_backend_tag, _ExecutionPolicy> {
+  template <class _Policy, class _ForwardIterator, class _BinaryPredicate>
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI optional<_ForwardIterator>
+  operator()(_Policy&& __policy, _ForwardIterator __first, _ForwardIterator __last, _BinaryPredicate&& __predicate)
+      const noexcept {
+    using _ForEachPartition = __dispatch<__for_each_iterator_partition, __current_configuration, _ExecutionPolicy>;
+    // split the input into partitions with minimum_size=1 and skipping 1 suffix element.
+    std::optional<__iterator_partitions<_ForwardIterator>> __partitions =
+        _ForEachPartition().__partition(__policy, __first, __last, 1, 1);
+    if (__partitions) {
+      __min_partition_result<_ForwardIterator> __min(__last);
+      _ForEachPartition()(__policy, *__partitions, [&](size_t __partition_idx) {
+        if (__partition_idx > __min.__min_partition)
+          return; // early termination - some result was already found in a partition closer to __first
+        __iterator_range<_ForwardIterator> __partition = __partitions->__partition(__partition_idx);
+        _ForwardIterator __left                        = __partition.__first;
+        _ForwardIterator __right                       = std::next(__left);
+        while (__left != __partition.__last) { // __right can be at __partition.__last since 1 tail element was skipped
+          if (__predicate(*__left, *__right)) {
+            __min.__commit(__partition_idx, __left);
+            return; // early termination - we've found some result and it's the leftmost one in this partition
+          }
+          __left = __right;
+          ++__right;
+        }
+      });
+      return __min.__min_iterator;
+    } else {
+      return std::adjacent_find(std::move(__first), std::move(__last), std::move(__predicate));
+    }
   }
 };
 

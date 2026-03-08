@@ -67,6 +67,26 @@ using __current_configuration _LIBCPP_NODEBUG =
 #    error "Invalid PSTL backend configuration"
 #  endif
 
+// PSTL implementation-specific functions
+
+template <class _Backend, class _ExecutionPolicy>
+struct __for_each_iterator_partition;
+// template <class _Policy, class _ForwardIterator, class _Function>
+// optional<__empty>
+// operator()(_Policy&&,
+//            const __pstl::__iterator_partitions<_ForwardIterator> &__partitions,
+//            _Function __func) const noexcept;
+//
+// template <class _Policy, class _ForwardIterator>
+// optional<__iterator_partitions<_ForwardIterator>>
+// __partition(_Policy&&,
+//             _ForwardIterator __first,
+//             _ForwardIterator __last,
+//             size_t __min_partition_size,
+//             size_t __suffix_to_skip) const noexcept;
+
+// Implementations of public PSTL functions
+
 template <class _Backend, class _ExecutionPolicy>
 struct __find_if;
 // template <class _Policy, class _ForwardIterator, class _Predicate>
@@ -302,6 +322,13 @@ struct __is_sorted;
 // template <class _Policy, class _ForwardIterator, class _Comp>
 // optional<bool>
 // operator()(_Policy&& __policy, _ForwardIterator __first, _ForwardIterator __last, _Comp&& __comp) const noexcept;
+
+template <class _Backend, class _ExecutionPolicy>
+struct __adjacent_find;
+// template <class _Policy, class _ForwardIterator, class _BinaryPredicate>
+// optional<_ForwardIterator>
+// operator()(_Policy&& __policy, _ForwardIterator __first, _ForwardIterator __last,
+//                                _BinaryPredicate&& __predicate) const noexcept;
 
 } // namespace __pstl
 _LIBCPP_END_NAMESPACE_STD

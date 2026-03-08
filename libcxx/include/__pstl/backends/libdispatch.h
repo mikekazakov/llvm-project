@@ -32,10 +32,12 @@
 #include <__pstl/cpu_algos/fill.h>
 #include <__pstl/cpu_algos/find_if.h>
 #include <__pstl/cpu_algos/for_each.h>
+#include <__pstl/cpu_algos/for_each_iterator_partition.h>
 #include <__pstl/cpu_algos/merge.h>
 #include <__pstl/cpu_algos/stable_sort.h>
 #include <__pstl/cpu_algos/transform.h>
 #include <__pstl/cpu_algos/transform_reduce.h>
+#include <__pstl/iterator_partitions.h>
 #include <__utility/empty.h>
 #include <__utility/exception_guard.h>
 #include <__utility/move.h>
@@ -96,6 +98,12 @@ struct __cpu_traits<__libdispatch_backend_tag> {
   __for_each(_RandomAccessIterator __first, _RandomAccessIterator __last, _Functor __func) {
     return __libdispatch::__dispatch_parallel_for(
         __libdispatch::__partition_chunks(__last - __first), std::move(__first), std::move(__func));
+  }
+
+  template <class _Functor>
+  _LIBCPP_HIDE_FROM_ABI static optional<__empty> __for_each_chunk(size_t __chunks, _Functor __func) {
+    __libdispatch::__dispatch_apply(__chunks, __func);
+    return __empty{};
   }
 
   template <class _RandomAccessIterator1, class _RandomAccessIterator2, class _RandomAccessIteratorOut>
@@ -358,6 +366,10 @@ struct __find_if<__libdispatch_backend_tag, _ExecutionPolicy>
 template <class _ExecutionPolicy>
 struct __for_each<__libdispatch_backend_tag, _ExecutionPolicy>
     : __cpu_parallel_for_each<__libdispatch_backend_tag, _ExecutionPolicy> {};
+
+template <class _ExecutionPolicy>
+struct __for_each_iterator_partition<__libdispatch_backend_tag, _ExecutionPolicy>
+    : __cpu_parallel_for_each_iterator_partition<__libdispatch_backend_tag, _ExecutionPolicy> {};
 
 template <class _ExecutionPolicy>
 struct __merge<__libdispatch_backend_tag, _ExecutionPolicy>
