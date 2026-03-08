@@ -11,7 +11,9 @@
 
 #include <__assert>
 #include <__config>
+#include <__algorithm/min.h>
 #include <__iterator/concepts.h>
+#include <__iterator/distance.h>
 #include <__pstl/backend_fwd.h>
 #include <__pstl/cpu_algos/cpu_traits.h>
 #include <__pstl/iterator_partitions.h>
