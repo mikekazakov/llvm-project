@@ -343,6 +343,18 @@ int main(int, char**) {
           (void)std::reduce(policy, std::move(first1), std::move(last1), init, reduction);
         });
       }
+
+      {
+        auto pred = maybe_throw(tokens[5], [](int a, int b) -> bool { return b - a == 1; });
+
+        // adjacent_find(first, last)
+        assert_non_throwing([=, &policy] { (void)std::adjacent_find(policy, std::move(first1), std::move(last1)); });
+
+        // adjacent_find(first, last, pred)
+        assert_non_throwing([=, &policy] {
+          (void)std::adjacent_find(policy, std::move(first1), std::move(last1), pred);
+        });
+      }
     }
   });
 }
