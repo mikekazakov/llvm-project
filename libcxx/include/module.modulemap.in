@@ -2473,6 +2473,9 @@ module std {
         module transform {
           header "__pstl/backends/statpart/transform.h"
         }
+        module transform_exclusive_scan {
+          header "__pstl/backends/statpart/transform_exclusive_scan.h"
+        }
         module transform_inclusive_scan_init {
           header "__pstl/backends/statpart/transform_inclusive_scan_init.h"
         }

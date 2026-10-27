@@ -27,6 +27,7 @@
 #include <__pstl/backends/statpart/stable_sort.h>
 #include <__pstl/backends/statpart/swap_ranges.h>
 #include <__pstl/backends/statpart/transform.h>
+#include <__pstl/backends/statpart/transform_exclusive_scan.h>
 #include <__pstl/backends/statpart/transform_inclusive_scan_init.h>
 #include <__pstl/backends/statpart/transform_reduce.h>
 #include <__pstl/backends/statpart/uninitialized_copy.h>

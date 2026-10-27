@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef _LIBCPP___PSTL_BACKENDS_STATPART_INCLUSIVE_SCAN_INIT_H
-#define _LIBCPP___PSTL_BACKENDS_STATPART_INCLUSIVE_SCAN_INIT_H
+#ifndef _LIBCPP___PSTL_BACKENDS_STATPART_TRANSFORM_INCLUSIVE_SCAN_INIT_H
+#define _LIBCPP___PSTL_BACKENDS_STATPART_TRANSFORM_INCLUSIVE_SCAN_INIT_H
 
 #include <__config>
 #include <__cstddef/size_t.h>
@@ -87,8 +87,8 @@ struct __transform_inclusive_scan_init<__statpart_backend_tag, _ExecutionPolicy>
         // General case: a chunk in the middle.
 
         // Compute and publish the local aggregate.
-        _Tp __aggregate =
-            std::transform_reduce(__chunk_first + 1, __chunk_last, __transform(*__chunk_first), __reduce, __transform);
+        _Tp __aggregate = std::transform_reduce(
+            __chunk_first + 1, __chunk_last, static_cast<_Tp>(__transform(*__chunk_first)), __reduce, __transform);
         // __decoupled_lookback_partition< _Tp >& __partition = __lookback.__partition(__chunk_index);
         __lookback_partition->__construct_aggregate(__aggregate);
 
@@ -182,4 +182,4 @@ _LIBCPP_END_NAMESPACE_STD
 
 _LIBCPP_POP_MACROS
 
-#endif // _LIBCPP___PSTL_BACKENDS_STATPART_INCLUSIVE_SCAN_INIT_H
+#endif // _LIBCPP___PSTL_BACKENDS_STATPART_TRANSFORM_INCLUSIVE_SCAN_INIT_H

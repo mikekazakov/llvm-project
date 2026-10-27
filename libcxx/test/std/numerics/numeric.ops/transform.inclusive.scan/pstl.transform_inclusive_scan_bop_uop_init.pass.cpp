@@ -178,23 +178,21 @@ struct TestUnsignedCharToSize_t {
   template <class ExecutionPolicy>
   void operator()(ExecutionPolicy&& policy) {
     //  Make sure that the calculations are done using the init typedef
-    unsigned char v[10];
-    std::iota(std::begin(v), std::end(v), static_cast<unsigned char>(1));
-    std::size_t res[10];
-    std::transform_inclusive_scan(
-        policy,
-        Iter1(std::begin(v)),
-        Iter1(std::end(v)),
-        Iter2(std::begin(res)),
-        std::multiplies<>(),
-        add_one{},
-        std::size_t{1});
-    std::size_t j = 2;
-    assert(res[0] == 2);
-    for (std::size_t i = 1; i < std::size(res); ++i) {
-      j *= i + 2;
-      assert(res[i] == j);
-    }
+    unsigned char a[1073];
+    std::size_t b[1073];
+    std::fill(std::begin(a), std::end(a), static_cast<unsigned char>(254));
+    runway_sample(std::size(a) + 1, [&](size_t i) {
+      std::transform_inclusive_scan(
+          policy,
+          Iter1(std::begin(a)),
+          Iter1(std::begin(a) + i),
+          Iter2(std::begin(b)),
+          std::plus<>{},
+          add_one{},
+          std::size_t{0});
+      for (std::size_t k = 0; k < i; ++k)
+        assert(b[k] == 255 * (k + 1));
+    });
   }
 };
 
