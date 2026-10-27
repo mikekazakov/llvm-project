@@ -166,6 +166,8 @@ namespace __pstl {
 //
 // transform_inclusive_scan_init family
 // -------------------------------------
+// - __inclusive_scan
+// - __inclusive_scan_init
 // - __transform_inclusive_scan
 
 //////////////////////////////////////////////////////////////
@@ -1008,7 +1010,7 @@ struct __transform_inclusive_scan<__default_backend_tag, _ExecutionPolicy> {
 template <class _ExecutionPolicy>
 struct __inclusive_scan<__default_backend_tag, _ExecutionPolicy> {
   template <class _Policy, class _ForwardIterator1, class _ForwardIterator2, class _BinaryOperation>
-  optional<_ForwardIterator2>
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI optional<_ForwardIterator2>
   operator()(_Policy&& __policy,
              _ForwardIterator1 __first,
              _ForwardIterator1 __last,
@@ -1023,13 +1025,13 @@ struct __inclusive_scan<__default_backend_tag, _ExecutionPolicy> {
 template <class _ExecutionPolicy>
 struct __inclusive_scan_init<__default_backend_tag, _ExecutionPolicy> {
   template <class _Policy, class _ForwardIterator1, class _ForwardIterator2, class _BinaryOperation, class _Tp>
-  optional<_ForwardIterator2>
+  [[nodiscard]] _LIBCPP_HIDE_FROM_ABI optional<_ForwardIterator2>
   operator()(_Policy&& __policy,
              _ForwardIterator1 __first,
              _ForwardIterator1 __last,
              _ForwardIterator2 __result,
              _BinaryOperation __reduce,
-             _Tp __value) const noexcept {
+             _Tp __init) const noexcept {
     using _TransformInclusiveScanInit =
         __dispatch<__transform_inclusive_scan_init, __current_configuration, _ExecutionPolicy>;
     return _TransformInclusiveScanInit()(
@@ -1039,7 +1041,7 @@ struct __inclusive_scan_init<__default_backend_tag, _ExecutionPolicy> {
         std::move(__result),
         std::move(__reduce),
         __identity{},
-        std::move(__value));
+        std::move(__init));
   }
 };
 
