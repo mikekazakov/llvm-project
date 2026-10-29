@@ -12,6 +12,7 @@
 #include <__algorithm/copy_if.h>
 #include <__algorithm/fill.h>
 #include <__assert>
+#include <__bit/popcount.h>
 #include <__config>
 #include <__cstddef/size_t.h>
 #include <__execution/is_execution_policy.h>
@@ -44,20 +45,40 @@ namespace __pstl {
 
 namespace __statpart {
 
+// __bitset_view is a non-owning view to a dynamically-sized bitset.
+// It consists of size_t words, its bit length it always rounded to the number of bits in a size_t.
 struct _LIBCPP_HIDE_FROM_ABI __bitset_view {
+  // The number of bits in a single size_t word
+  static constexpr size_t __bits_per_word_ = CHAR_BIT * sizeof(size_t);
+
+  // The pointer to the bitset words
   size_t* __bits_;
+
+  // The number of of size_t words in the bitset
   size_t __words_;
 
+  // Checks if the specified bit is true
   _LIBCPP_HIDE_FROM_ABI bool __test(size_t __pos) const {
-    size_t __word_index = __pos / (CHAR_BIT * sizeof(size_t));
-    size_t __bit_index  = __pos % (CHAR_BIT * sizeof(size_t));
+    size_t __word_index = __pos / __bits_per_word_;
+    size_t __bit_index  = __pos % __bits_per_word_;
     return (__bits_[__word_index] & (size_t(1) << __bit_index)) != 0;
   }
+
+  // Sets the specified bit to true
   _LIBCPP_HIDE_FROM_ABI void __set(size_t __pos) {
-    size_t __word_index = __pos / (CHAR_BIT * sizeof(size_t));
-    size_t __bit_index  = __pos % (CHAR_BIT * sizeof(size_t));
+    size_t __word_index = __pos / __bits_per_word_;
+    size_t __bit_index  = __pos % __bits_per_word_;
     __bits_[__word_index] |= (size_t(1) << __bit_index);
   }
+
+  // Sets the specified bit to false
+  _LIBCPP_HIDE_FROM_ABI void __reset(size_t __pos) {
+    size_t __word_index = __pos / __bits_per_word_;
+    size_t __bit_index  = __pos % __bits_per_word_;
+    __bits_[__word_index] &= ~(size_t(1) << __bit_index);
+  }
+
+  // Sets all bits to false
   _LIBCPP_HIDE_FROM_ABI void __reset() {
     for (size_t __i = 0; __i < __words_; ++__i) {
       __bits_[__i] = 0;
@@ -65,6 +86,11 @@ struct _LIBCPP_HIDE_FROM_ABI __bitset_view {
   }
 };
 
+// __sharded_dynamic_bitset is an owned dynamic bitset that consists of shards of equal length residing in a contiguous
+// memory block.
+// Upon construction the number of shards and the number of bits per each shard is provided.
+// The bit size of each shard is always rounded up to the cache line, such that they can be used exclusively without
+// false sharing.
 struct _LIBCPP_HIDE_FROM_ABI __sharded_dynamic_bitset {
   unique_ptr<size_t[]> __bits_;
   size_t __shards_count_;
@@ -91,21 +117,34 @@ struct _LIBCPP_HIDE_FROM_ABI __sharded_dynamic_bitset {
   }
 };
 
+// Applies the predicate to each element in [first, last), stored the results in the bitset and returns the number of
+// 'true' responses of the predicate.
 template <class _ForwardIterator, class _Pred>
 _LIBCPP_HIDE_FROM_ABI size_t __count_and_cache_predicate_results(
     _ForwardIterator __first, _ForwardIterator __last, const _Pred& __pred, __bitset_view __bitset) {
   size_t __occupied_count = 0;
-  size_t __local_idx      = 0;
-  for (auto __it = __first; __it != __last; ++__it) {
-    if (__pred(*__it)) {
-      __bitset.__set(__local_idx);
-      ++__occupied_count;
+  size_t* __bits_word_ptr = __bitset.__bits_;
+  size_t __bits_word      = 0;
+  size_t __bit_idx        = 0;
+  for (; __first != __last; ++__first) {
+    bool __pred_val = __pred(*__first);
+    __bits_word |= static_cast<size_t>(__pred_val) << __bit_idx; // Update the current word with this predicate result
+    if (++__bit_idx == __bitset_view::__bits_per_word_) {
+      __occupied_count += std::__popcount(__bits_word); // Update the total occupancy with this word
+      *__bits_word_ptr++ = __bits_word;                 // Store the collected flags
+      __bits_word        = 0;
+      __bit_idx          = 0;
     }
-    ++__local_idx;
+  }
+  if (__bit_idx != 0) { // Process any leftovers in the current word
+    __occupied_count += std::__popcount(__bits_word);
+    *__bits_word_ptr = __bits_word;
   }
   return __occupied_count;
 }
 
+// Copies the elements from [first, last) into [result, ...) depending on the flag values in the bitset.
+// Returns the end iterator of the destination range.
 template <class _ForwardIterator1, class _ForwardIterator2>
 _LIBCPP_HIDE_FROM_ABI _ForwardIterator2 __copy_if_flag_set(
     _ForwardIterator1 __first, _ForwardIterator1 __last, _ForwardIterator2 __result, __bitset_view __bitset) {
