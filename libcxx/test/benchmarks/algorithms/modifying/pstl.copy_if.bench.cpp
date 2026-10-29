@@ -25,8 +25,6 @@
 #include "test_macros.h"
 #include "../../GenerateInput.h"
 
-#define TEST_PSTL_ENABLE_SEQ_BASELINES
-
 int main(int argc, char** argv) {
   // A predicate that does just a bit more than a no-op
   struct minimal {
