@@ -118,7 +118,7 @@ struct _LIBCPP_HIDE_FROM_ABI __sharded_dynamic_bitset {
 };
 
 // Applies the predicate to each element in [first, last), stored the results in the bitset and returns the number of
-// 'true' responses of the predicate.
+// 'true' responses of the predicate. Bitset is not required to be initialized before calling this function.
 template <class _ForwardIterator, class _Pred>
 _LIBCPP_HIDE_FROM_ABI size_t __count_and_cache_predicate_results(
     _ForwardIterator __first, _ForwardIterator __last, const _Pred& __pred, __bitset_view __bitset) {
@@ -189,9 +189,6 @@ struct __copy_if<__statpart_backend_tag, _ExecutionPolicy> {
             // Acquire the local scratch memory
             __statpart::__bitset_view __bitset = __ctx.__shard(__worker_idx);
 
-            // Reset the local storage by setting all flags to false
-            __bitset.__reset();
-
             // Populate the bitset for each of the elements in the chunk and get the occupancy
             size_t __occupied_count =
                 __statpart::__count_and_cache_predicate_results(__chunk_first, __chunk_last, __pred, __bitset);
@@ -218,9 +215,6 @@ struct __copy_if<__statpart_backend_tag, _ExecutionPolicy> {
                                __statpart::__decoupled_lookback_partition<size_t>* __lookback_partition) {
         // Acquire the local scratch memory
         __statpart::__bitset_view __bitset = __ctx.__shard(__worker_idx);
-
-        // Reset the local storage by setting all flags to false
-        __bitset.__reset();
 
         // Populate the bitset for each of the elements in the chunk and get the occupancy
         size_t __occupied_count =
@@ -250,9 +244,6 @@ struct __copy_if<__statpart_backend_tag, _ExecutionPolicy> {
                              __statpart::__decoupled_lookback_partition<size_t>* __nonexistent_lookback_partition) {
         // Acquire the local scratch memory
         __statpart::__bitset_view __bitset = __ctx.__shard(__worker_idx);
-
-        // Reset the local storage by setting all flags to false
-        __bitset.__reset();
 
         // Populate the bitset for each of the elements in the chunk and get the occupancy
         __statpart::__count_and_cache_predicate_results(__chunk_first, __chunk_last, __pred, __bitset);

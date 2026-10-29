@@ -547,7 +547,7 @@ _LIBCPP_HIDE_FROM_ABI optional<__empty> __lookback_scan(
   // work on in a monotonically incremental order.
   atomic<size_t> __next_partition_idx{0};
   __statpart::__for_each_index(__max_workers_count, [&](size_t __worker_id) {
-    // Pick the next chunk to work on, stop once there's no more work the iteration stops.
+    // Pick the next chunk to work on, stop once the partitions are exhausted.
     size_t __partition_idx;
     while ((__partition_idx = __next_partition_idx.fetch_add(1, std::memory_order_relaxed)) <
            __partitions.__partitions_count()) {
