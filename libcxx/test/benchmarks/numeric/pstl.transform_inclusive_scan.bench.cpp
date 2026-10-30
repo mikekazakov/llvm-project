@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
         })
         ->Arg(1 << 6)  // 64
         ->Arg(1 << 16) // 65'536
+        ->Arg(1 << 20) // 1,048,576
         ->Arg(1 << 26) // 67'108'864
         ->UseRealTime();
   };

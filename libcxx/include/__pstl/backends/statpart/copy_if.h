@@ -159,6 +159,58 @@ _LIBCPP_HIDE_FROM_ABI _ForwardIterator2 __copy_if_flag_set(
   return __result;
 }
 
+// Three-pass copy_if:
+//  1. In parallel, for every partition evaluate the predicate, cache its results in a bitset and count the number of
+//     elements to be copied.
+//  2. Serially, compute the output offset of every partition as an exclusive scan of these counts.
+//  3. In parallel, copy the selected elements of every partition starting at its output offset.
+template <class _RandomAccessIterator1, class _RandomAccessIterator2, class _Pred>
+_LIBCPP_HIDE_FROM_ABI optional<_RandomAccessIterator2> __copy_if_three_pass(
+    _RandomAccessIterator1 __first,
+    _RandomAccessIterator1 __last,
+    _RandomAccessIterator2 __result,
+    const _Pred& __pred) {
+  auto __partitions = __statpart::__partition(__first, __last);
+  if (!__partitions.__value_) {
+    if (__partitions.__status_ == __partitioning_status::__bad_alloc)
+      return nullopt; // Failed to allocate memory for the partitions, propagate the error up.
+    // Not enough elements or no parallelism available, switch to the serial implementation.
+    return std::copy_if(std::move(__first), std::move(__last), std::move(__result), __pred);
+  }
+  const size_t __partitions_count = __partitions.__value_->__partitions_count();
+
+  // One bitset shard per partition. The shards are padded to cache lines, so partitions never write to the same line.
+  __sharded_dynamic_bitset __bitset{__partitions_count, __partitions.__value_->__max_partition_size()};
+  // Number of selected elements per partition after the first pass, output offsets of partitions after the second.
+  unique_ptr<size_t[]> __offsets(new (std::nothrow) size_t[__partitions_count]);
+  if (!__bitset.__bits_ || !__offsets)
+    return nullopt; // Failed to allocate memory
+
+  // Pass 1: parallel predicate evaluation and counting
+  __statpart::__for_each_partition_index(*__partitions.__value_, [&](size_t __index) {
+    auto __range       = __partitions.__value_->__partition(__index);
+    __offsets[__index] = __statpart::__count_and_cache_predicate_results(
+        __range.__first, __range.__last, __pred, __bitset.__shard(__index));
+  });
+
+  // Pass 2: serial exclusive scan of the counts into the output offsets (in-place)
+  size_t __total = 0;
+  for (size_t __index = 0; __index < __partitions_count; ++__index) {
+    size_t __count     = __offsets[__index];
+    __offsets[__index] = __total;
+    __total += __count;
+  }
+
+  // Pass 3: parallel copying of the selected elements
+  __statpart::__for_each_partition_index(*__partitions.__value_, [&](size_t __index) {
+    auto __range = __partitions.__value_->__partition(__index);
+    __statpart::__copy_if_flag_set(
+        __range.__first, __range.__last, __result + __offsets[__index], __bitset.__shard(__index));
+  });
+
+  return __result + __total;
+}
+
 } // namespace __statpart
 
 template <class _ExecutionPolicy>
@@ -170,6 +222,9 @@ struct __copy_if<__statpart_backend_tag, _ExecutionPolicy> {
     if constexpr (__is_parallel_execution_policy_v<_ExecutionPolicy> &&
                   __has_random_access_iterator_category_or_concept<_ForwardIterator1>::value &&
                   __has_random_access_iterator_category_or_concept<_ForwardIterator2>::value) {
+#  if 0
+      return __statpart::__copy_if_three_pass(std::move(__first), std::move(__last), std::move(__result), __pred);
+#  else
       auto __setup = [](size_t __max_workers_count,
                         size_t __max_partition_size) -> optional<__statpart::__sharded_dynamic_bitset> {
         __statpart::__sharded_dynamic_bitset __bitset{__max_workers_count, __max_partition_size};
@@ -268,6 +323,7 @@ struct __copy_if<__statpart_backend_tag, _ExecutionPolicy> {
       if (!__ret)
         return nullopt;
       return __out_iter;
+#  endif
     } else {
       return std::copy_if(std::move(__first), std::move(__last), std::move(__result), std::move(__pred));
     }

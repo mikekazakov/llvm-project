@@ -26,6 +26,13 @@
 #include <__utility/empty.h>
 #include <__utility/move.h>
 
+#include <__memory/allocator.h>
+#include <__memory/construct_at.h>
+#include <__memory/destroy.h>
+#include <__memory/unique_ptr.h>
+#include <__numeric/exclusive_scan.h>
+#include <__numeric/reduce.h>
+
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
 #endif
@@ -57,6 +64,7 @@ struct __transform_inclusive_scan_init<__statpart_backend_tag, _ExecutionPolicy>
     if constexpr (__is_parallel_execution_policy_v<_ExecutionPolicy> &&
                   __has_random_access_iterator_category_or_concept<_ForwardIterator1>::value &&
                   __has_random_access_iterator_category_or_concept<_ForwardIterator2>::value) {
+#  if 1
       auto __scan_head =
           [&](__empty /*__ctx*/,
               size_t /*__worker_idx*/,
@@ -162,6 +170,69 @@ struct __transform_inclusive_scan_init<__statpart_backend_tag, _ExecutionPolicy>
       if (!__ret)
         return nullopt;
       return __result + (__last - __first);
+#  else
+      // Split into partitions with at least 3 elements in each
+      auto __partitions = __statpart::__partition(__first, __last, 3);
+      if (!__partitions.__value_) {
+        if (__partitions.__status_ == __statpart::__partitioning_status::__bad_alloc) {
+          // Failed to allocate memory for the partitions, propagate the error up.
+          return nullopt;
+        } else {
+          // Not enough elements to run in parallel, switch to serial implementation.
+          return std::transform_inclusive_scan(
+              std::move(__first),
+              std::move(__last),
+              std::move(__result),
+              std::move(__reduce),
+              std::move(__transform),
+              std::move(__init));
+        }
+      }
+
+      auto __destroy = [__count = __partitions.__value_->__partitions_count()](_Tp* __ptr) {
+        std::destroy_n(__ptr, __count);
+        std::allocator<_Tp>().deallocate(__ptr, __count);
+      };
+
+      // TODO: use __uninitialized_buffer
+      // TODO: allocate one element per worker instead of one element per chunk
+      unique_ptr<_Tp[], decltype(__destroy)> __chunk_totals(
+          std::allocator<_Tp>().allocate(__partitions.__value_->__partitions_count()), __destroy);
+
+      // Phase 1: parallel chunk totals
+      __statpart::__for_each_partition_index(*__partitions.__value_, [&](size_t __index) {
+        auto __range = __partitions.__value_->__partition(__index);
+        std::__construct_at(
+            __chunk_totals.get() + __index,
+            std::transform_reduce(
+                __range.__first + 1,
+                __range.__last,
+                static_cast<_Tp>(__transform(*__range.__first)),
+                __reduce,
+                __transform));
+      });
+
+      // Phase 2: serial exclusive prefix of totals to per-chunk offsets (in-place)
+      std::exclusive_scan(
+          __chunk_totals.get(),
+          __chunk_totals.get() + __partitions.__value_->__partitions_count(),
+          __chunk_totals.get(),
+          std::move(__init),
+          __reduce);
+
+      // Phase 3: parallel per-chunk serial scan
+      __statpart::__for_each_partition_index(*__partitions.__value_, [&](size_t __index) {
+        auto __range = __partitions.__value_->__partition(__index);
+        std::transform_inclusive_scan(
+            __range.__first,
+            __range.__last,
+            __result + (__range.__first - __first),
+            __reduce,
+            __transform,
+            std::move(*(__chunk_totals.get() + __index)));
+      });
+      return __result + (__last - __first);
+#  endif
     } else {
       // Non-random access iterators cannot be processed in parallel, fall back to the sequential implementation.
       return std::transform_inclusive_scan(
