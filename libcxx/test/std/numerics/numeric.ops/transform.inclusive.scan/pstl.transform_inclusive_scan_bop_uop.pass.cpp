@@ -28,6 +28,8 @@
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <vector>
+#include <string>
 #include <numeric>
 
 #include "test_execution_policies.h"
@@ -131,7 +133,7 @@ struct TestInt {
         test(Iter1(std::begin(a)), Iter1(std::begin(a) + i), mult, negate, exp_mul_neg_0, exp_mul_neg_0 + i);
       }
     }
-    { // Constuct iota from std::plus<> and add_one
+    { // Construct iota from std::plus<> and add_one
       int ia[1073];
       int ib[1073];
       std::fill(std::begin(ia), std::end(ia), 0);
@@ -145,6 +147,80 @@ struct TestInt {
         std::fill(std::begin(ib), std::begin(ib) + i, -1);
       });
     }
+    { // Check against the non-pstl version
+      for (int size : {0, 1, 2, 100, 350, 10'000}) {
+        std::vector<int> data(size);
+        std::iota(data.begin(), data.end(), 7);
+
+        std::vector<int> expected(size);
+        auto binary_op = [check = std::string("Banane")](int i, int j) {
+          assert(check == "Banane"); // ensure that no double-moves happen
+          return i + j;
+        };
+        auto unary_op = [check = std::string("Banane")](int i) {
+          assert(check == "Banane"); // ensure that no double-moves happen
+          return i + 1;
+        };
+
+        std::transform_inclusive_scan(data.begin(), data.end(), expected.begin(), binary_op, unary_op);
+
+        std::vector<int> result(size);
+        auto ret = std::transform_inclusive_scan(
+            policy, Iter1(data.data()), Iter1(data.data() + data.size()), Iter2(result.data()), binary_op, unary_op);
+        assert(ret == Iter2(result.data() + size));
+        assert(result == expected);
+      }
+    }
+    { // binary_op whose identity element is not int{}
+      for (int size : {0, 1, 2, 100, 350, 10'000}) {
+        std::vector<int> data(size);
+        std::iota(data.begin(), data.end(), 7);
+
+        auto binary_op = std::multiplies{};
+        auto unary_op  = [](int x) { return (x % 1'000 == 0) ? 2 : 1; }; // keeps product below 2^10
+
+        std::vector<int> expected(size);
+        std::transform_inclusive_scan(data.begin(), data.end(), expected.begin(), binary_op, unary_op);
+
+        std::vector<int> result(size);
+        auto ret = std::transform_inclusive_scan(
+            policy, Iter1(data.data()), Iter1(data.data() + data.size()), Iter2(result.data()), binary_op, unary_op);
+        assert(ret == Iter2(result.data() + size));
+        assert(result == expected);
+      }
+    }
+  }
+};
+
+template <class Iter1, class Iter2>
+struct TestString {
+  template <class ExecutionPolicy>
+  void operator()(ExecutionPolicy&& policy) {
+    {
+      auto binary_op = [](const std::string& a, const std::string& b) { return a + b; };
+      auto unary_op  = [](const std::string& s) { return s + "!"; };
+      for (std::size_t size : {0, 1, 2, 3, 10, 100, 1000}) {
+        std::vector<std::string> data(size);
+        for (std::size_t i = 0; i < size; ++i)
+          data[i] = std::string(1, static_cast<char>('a' + i % 26));
+
+        std::vector<std::string> expected(size);
+        std::transform_inclusive_scan(data.begin(), data.end(), expected.begin(), binary_op, unary_op);
+
+        // Not in place
+        std::vector<std::string> result(size);
+        auto ret = std::transform_inclusive_scan(
+            policy, Iter1(data.data()), Iter1(data.data() + data.size()), Iter2(result.data()), binary_op, unary_op);
+        assert(ret == Iter2(result.data() + size));
+        assert(result == expected);
+
+        // In place
+        ret = std::transform_inclusive_scan(
+            policy, Iter1(data.data()), Iter1(data.data() + data.size()), Iter2(data.data()), binary_op, unary_op);
+        assert(ret == Iter2(data.data() + size));
+        assert(data == expected);
+      }
+    }
   }
 };
 
@@ -154,6 +230,12 @@ int main(int, char**) {
                     types::for_each(
                         types::forward_iterator_list<int*>{},
                         TestIteratorWithPolicies<types::partial_instantiation<TestInt, Iter>::template apply>{});
+                  }});
+  types::for_each(types::forward_iterator_list<std::string*>{}, types::apply_type_identity{[](auto v) {
+                    using Iter = typename decltype(v)::type;
+                    types::for_each(
+                        types::forward_iterator_list<std::string*>{},
+                        TestIteratorWithPolicies<types::partial_instantiation<TestString, Iter>::template apply>{});
                   }});
   return 0;
 }
